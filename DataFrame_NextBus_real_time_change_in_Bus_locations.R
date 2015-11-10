@@ -74,8 +74,38 @@ if (debug_nextbus == TRUE ) {
 
 # recs <- xmlToList(xml_recs)
 
-df <- as.data.frame(t(xmlSApply(xml_recs["/body/vehicle"],xmlAttrs)),
-                    stringsAsFactors=FALSE)
+# Function to parse one real-time NextBus XML vehicle to an R dataframe
+# Note that there can be missing attributes in the real-time NextBus
+# XML vehicle (e.g., XML attribute "dirTag" or "routeTag" can be
+# missing when the NextBus vehicle happen to turn around in real-time)
+parse_nextbus_vehicle_to_df <- function(vehicle) {
+  # parse the NextBus XML dataframe
+  print(vehicle)
+  vehicle_id <- xmlGetAttr(vehicle, "id")
+  route_tag <- xmlGetAttr(vehicle, "routeTag")
+  route_tag <- ifelse(length(route_tag)==0,NA,route_tag) # NextBus sometimes omits it
+  dir_tag <- xmlGetAttr(vehicle, "dirTag")
+  dir_tag <- ifelse(length(dir_tag)==0,NA,dir_tag) # NextBus sometimes omits it
+  lat <- xmlGetAttr(vehicle, "lat")
+  lat <- ifelse(length(lat)==0,NA,as.numeric(lat))
+  lon <- xmlGetAttr(vehicle, "lon")
+  lon <- ifelse(length(lon)==0,NA,as.numeric(lon))
+  secsSinceReport <- xmlGetAttr(vehicle, "secsSinceReport")
+  secsSinceReport <- ifelse(length(secsSinceReport)==0,NA,as.numeric(secsSinceReport))
+  predictable <- xmlGetAttr(vehicle, "predictable")
+  heading <- xmlGetAttr(vehicle, "heading")
+  speed <- xmlGetAttr(vehicle, "speedKmHr")
+  speed <- ifelse(length(speed)==0,NA,as.numeric(speed))
+
+  data.frame(vehicle_id, route_tag, dir_tag, lat, lon,
+             secsSinceReport, predictable, heading,
+             speed, stringsAsFactors = FALSE)
+}
+
+df <- do.call(rbind,
+              xpathApply(xml_recs, "/body/vehicle",
+                         parse_nextbus_vehicle_to_df))
+
 
 # This is an example ggplot with the delay in the real-time of the locations
 
