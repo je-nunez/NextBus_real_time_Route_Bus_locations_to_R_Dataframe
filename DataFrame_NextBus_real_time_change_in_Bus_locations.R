@@ -1,8 +1,12 @@
 
 # documentation of the R package "sp" (geo-spatial):
 #     https://cran.r-project.org/web/packages/sp/sp.pdf
+#
+# of RgoogleMaps:
+#
+#     https://cran.r-project.org/web/packages/RgoogleMaps/RgoogleMaps.pdf
 
-required_packages <- c("XML", "sp", "gglot2")
+required_packages <- c("XML", "sp", "RgoogleMaps", "gglot2")
 
 missing_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
 if( 0 < length(missing_packages) ) {
@@ -11,7 +15,8 @@ if( 0 < length(missing_packages) ) {
 
 require(XML)
 require(sp)
-library(ggplot2)
+require(ggplot2)
+require(RgoogleMaps)
 
 # how long in time to analyze changes in the vehicle locations in NextBus:
 # in the most recent 15 minutes
@@ -84,6 +89,7 @@ parse_nextbus_vehicle_to_df <- function(vehicle) {
     print("Parsing NextBus XML real-time vehicle location:")
     print(vehicle)
   }
+
   vehicle_id <- xmlGetAttr(vehicle, "id")
   route_tag <- xmlGetAttr(vehicle, "routeTag")
   route_tag <- ifelse(length(route_tag)==0,NA,route_tag) # NextBus sometimes omits it
@@ -100,18 +106,19 @@ parse_nextbus_vehicle_to_df <- function(vehicle) {
   speed <- xmlGetAttr(vehicle, "speedKmHr")
   speed <- ifelse(length(speed)==0,NA,as.numeric(speed))
 
-  nextbus_veh_df <- data.frame(vehicle_id, route_tag, dir_tag, 
-                               lat, lon, secsSinceReport, 
-                               predictable, heading, speed, 
+  nextbus_veh_df <- data.frame(vehicle_id, route_tag, dir_tag,
+                               lat, lon, secsSinceReport,
+                               predictable, heading, speed,
                                stringsAsFactors = FALSE)
+
   if (debug_nextbus == TRUE ) {
     print("Parsed data frame from NextBus XML real-time vehicle location:")
     print(nextbus_veh_df, digits = 6)
   }
   # return the parsed data frame from NextBus XML
   nextbus_veh_df
-
 }
+
 
 df <- do.call(rbind,
               xpathApply(xml_recs, "/body/vehicle",
@@ -126,3 +133,60 @@ plot_title <- sprintf("Delays in the Real-Time Location of the Transit Vehicles 
 ggplot(df, aes(lat, lon, colour=secsSinceReport)) +
   theme_minimal() + geom_point() +
   labs(x = "Latitude", y = "Longitude", title=plot_title)
+
+
+bounding_box <- qbbox(lat = df[,"lat"], lon = df[,"lon"])
+
+# A temporary Google maps with background of the place where the transit agency's route
+# has the vehicles servicing it
+basemap_fname <- file.path(tempdir(), "basemap_google.png")
+
+# Redirect graphical output
+
+gmap_zoom <- min(MaxZoom(range(df$lat), range(df$lon)))
+
+# Should  MINIMUMSIZE be TRUE ? Then it wouldn't need the zoom argument. The issue is
+# that sometimes when MINIMUMSIZE=TRUE, it returns: 'Error: all(size <= 640) is not TRUE'
+background_map <- GetMap.bbox(bounding_box$lonR, bounding_box$latR, size = c(640, 640),
+                              zoom = gmap_zoom, format = "png32", maptype="roadmap",
+                              SCALE=1, destfile = basemap_fname, MINIMUMSIZE = FALSE,
+                              RETURNIMAGE = TRUE, GRAYSCALE = FALSE)
+
+# Redirect graphical output
+png("nextbus_vehicles_on_gmap.png", type = 'cairo-png')
+dev.cur()
+plot.new()
+
+# Try to map the NextBus vehicle locations on the background Google map giving colors
+# according to the "dir_tag" of the vehicles servicing that route
+possible_dir_tags = unique(df$dir_tag)
+possible_colors = c("green", "red", "blue", "yellow", "orange")
+
+vehicles_map <- background_map
+
+for (i in 1:length(possible_dir_tags)){
+  a_dir_tag <- possible_dir_tags[i]
+  assoc_color <- possible_colors[i %% length(possible_colors)]
+  if ( debug_nextbus == TRUE ) {
+     debug_msg <- sprintf("Plotting vehicles in direction '%s' with color '%s'",
+                          a_dir_tag, assoc_color)
+     print(debug_msg)
+  }
+  to_add <- ifelse( i == 1, FALSE, TRUE )
+
+  vehicles_in_this_direction <- df[df$dir_tag == a_dir_tag,]
+
+  tmp <- PlotOnStaticMap(background_map,
+                         lat = vehicles_in_this_direction$lat,
+                         lon = vehicles_in_this_direction$lon,
+                         zoom = gmap_zoom, NEWMAP = FALSE, add = to_add,
+                         FUN = points, cex = 1.5, pch = 20, col = assoc_color)
+}
+
+# Draw the vehicle IDs as labels on the map
+## (This below works but is not ready yet because of font sizes and distance to points)
+#
+# TextOnStaticMap(background_map, lat = df$lat, lon = df$lon,
+#                 labels = df$vehicle_id, add = TRUE)
+
+dev.off()

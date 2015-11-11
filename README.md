@@ -37,7 +37,7 @@ NextBus has a request limit that only one `vehicleLocations` query is allowed ev
 This project is a *work in progress*. The implementation is *incomplete* and
 subject to change. The documentation can be inaccurate.
 
-# An example ggplot of the dataframe
+# An example ggplot of the NextBus vehicle locations dataframe
 
 This is a simple `ggplot()` graph in `R` of the daframe obtained from the
 NextBus real-time XML Feed API, giving the delay in updating the real-time
@@ -50,4 +50,15 @@ one given moment:
 (The geographical locations of the transit buses don't need to be
 ncessarily the coordinates of the bus stops, for a bus may be in
 movement when its location was registered or updated in NextBus.)
+
+# An example RgoogleMaps of the NextBus vehicle locations dataframe
+
+The program uses `RgoogleMaps` to plot the real-time location of the
+vehicles servicing a transit route, and saves this plot in a file
+name `nextbus_vehicles_on_gmap.png`.
+
+An example of the RgoogleMaps plot with the NextBus real-time vehicle
+locations for route 38R of San Francisco Muni is below:
+
+![A RgoogleMaps plot with the NextBus real-time vehicle locations for route 38R of San Francisco Muni](/nextbus_vehicles_on_gmap.png?raw=true "A RgoogleMaps plot with the NextBus real-time vehicle locations for route 38R of San Francisco Muni")
 
