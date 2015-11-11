@@ -80,7 +80,10 @@ if (debug_nextbus == TRUE ) {
 # missing when the NextBus vehicle happen to turn around in real-time)
 parse_nextbus_vehicle_to_df <- function(vehicle) {
   # parse the NextBus XML dataframe
-  print(vehicle)
+  if (debug_nextbus == TRUE ) {
+    print("Parsing NextBus XML real-time vehicle location:")
+    print(vehicle)
+  }
   vehicle_id <- xmlGetAttr(vehicle, "id")
   route_tag <- xmlGetAttr(vehicle, "routeTag")
   route_tag <- ifelse(length(route_tag)==0,NA,route_tag) # NextBus sometimes omits it
@@ -97,9 +100,17 @@ parse_nextbus_vehicle_to_df <- function(vehicle) {
   speed <- xmlGetAttr(vehicle, "speedKmHr")
   speed <- ifelse(length(speed)==0,NA,as.numeric(speed))
 
-  data.frame(vehicle_id, route_tag, dir_tag, lat, lon,
-             secsSinceReport, predictable, heading,
-             speed, stringsAsFactors = FALSE)
+  nextbus_veh_df <- data.frame(vehicle_id, route_tag, dir_tag, 
+                               lat, lon, secsSinceReport, 
+                               predictable, heading, speed, 
+                               stringsAsFactors = FALSE)
+  if (debug_nextbus == TRUE ) {
+    print("Parsed data frame from NextBus XML real-time vehicle location:")
+    print(nextbus_veh_df, digits = 6)
+  }
+  # return the parsed data frame from NextBus XML
+  nextbus_veh_df
+
 }
 
 df <- do.call(rbind,
