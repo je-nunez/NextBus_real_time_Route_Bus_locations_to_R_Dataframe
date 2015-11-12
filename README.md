@@ -68,6 +68,5 @@ Note that in this map it happens to appear a vehicle which is filled in
 `blue`: NextBus didn't provide a `dirTag` for it (a parked out-of-service
 vehicle?), so the parser in `R` inserted a `NA` value for the column
 `dir_tag` for it, and the plotter choose blue as an allowable color to
-distinguish this vehicle.
+distinguish the case this vehicle represents.
 
-this case it represents 
