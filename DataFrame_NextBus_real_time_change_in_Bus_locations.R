@@ -134,59 +134,114 @@ ggplot(df, aes(lat, lon, colour=secsSinceReport)) +
   theme_minimal() + geom_point() +
   labs(x = "Latitude", y = "Longitude", title=plot_title)
 
+# Function to plot the NextBus real-time vehicle locations data frame
+# onto a Google Maps of the locality.
 
-bounding_box <- qbbox(lat = df[,"lat"], lon = df[,"lon"])
+plot_nextbus_vehicle_df_gmaps <- function(nextbus_df, dest_png_fname,
+                                          gmap_type = "roadmap") {
 
-# A temporary Google maps with background of the place where the transit agency's route
-# has the vehicles servicing it
-basemap_fname <- file.path(tempdir(), "basemap_google.png")
+  allowable_gmap_types <- c("roadmap", "mobile", "satellite", "terrain",
+                            "hybrid", "mapmaker-roadmap", "mapmaker-hybrid")
 
-# Redirect graphical output
+  gmap_type_to_req <- gmap_type
+  if ( ! ( gmap_type_to_req %in% allowable_gmap_types ) ) {
+    # What to do? Silently correct the gmap_type or fail ? In more
+    # production-ready environments it should be strict, so the callee is
+    # making an assumption that is wrong, so the caller should be fail.
+    # In more relaxed envs, either filter-and-adjust this wrong parameter,
+    # or pass it through as-is (very risky).
 
-gmap_zoom <- min(MaxZoom(range(df$lat), range(df$lon)))
-
-# Should  MINIMUMSIZE be TRUE ? Then it wouldn't need the zoom argument. The issue is
-# that sometimes when MINIMUMSIZE=TRUE, it returns: 'Error: all(size <= 640) is not TRUE'
-background_map <- GetMap.bbox(bounding_box$lonR, bounding_box$latR, size = c(640, 640),
-                              zoom = gmap_zoom, format = "png32", maptype="roadmap",
-                              SCALE=1, destfile = basemap_fname, MINIMUMSIZE = FALSE,
-                              RETURNIMAGE = TRUE, GRAYSCALE = FALSE)
-
-# Redirect graphical output
-png("nextbus_vehicles_on_gmap.png", type = 'cairo-png')
-dev.cur()
-plot.new()
-
-# Try to map the NextBus vehicle locations on the background Google map giving colors
-# according to the "dir_tag" of the vehicles servicing that route
-possible_dir_tags = unique(df$dir_tag)
-possible_colors = c("green", "red", "blue", "yellow", "orange")
-
-vehicles_map <- background_map
-
-for (i in 1:length(possible_dir_tags)){
-  a_dir_tag <- possible_dir_tags[i]
-  assoc_color <- possible_colors[i %% length(possible_colors)]
-  if ( debug_nextbus == TRUE ) {
-     debug_msg <- sprintf("Plotting vehicles in direction '%s' with color '%s'",
-                          a_dir_tag, assoc_color)
-     print(debug_msg)
+    cat("Invalid Google Map type requested '", gmap_type_to_req,
+        "'. Filtering it ", sep = "")
+    gmap_type_to_req <- "roadmap"
   }
-  to_add <- ifelse( i == 1, FALSE, TRUE )
 
-  vehicles_in_this_direction <- df[df$dir_tag == a_dir_tag,]
+  bounding_box <- qbbox(lat = nextbus_df[,"lat"], lon = nextbus_df[,"lon"])
 
-  tmp <- PlotOnStaticMap(background_map,
-                         lat = vehicles_in_this_direction$lat,
-                         lon = vehicles_in_this_direction$lon,
-                         zoom = gmap_zoom, NEWMAP = FALSE, add = to_add,
-                         FUN = points, cex = 1.5, pch = 20, col = assoc_color)
+  # A temporary Google maps with background of the place where the transit
+  # agency's route has the vehicles servicing it
+
+  basemap_fname <- file.path(tempdir(), "basemap_google.png")
+
+  # The zoom to apply to the Google Maps
+
+  gmap_zoom <- min(MaxZoom(range(nextbus_df$lat), range(nextbus_df$lon)))
+
+  # Should  MINIMUMSIZE be TRUE ? Then it wouldn't need the zoom argument.
+  # The issue is that sometimes when MINIMUMSIZE=TRUE, it returns:
+  # 'Error: all(size <= 640) is not TRUE'
+
+  plot_gmap <- GetMap.bbox(bounding_box$lonR, bounding_box$latR,
+                                size = c(640, 640), zoom = gmap_zoom,
+                                format = "png32", maptype = gmap_type_to_req,
+                                SCALE=1, destfile = basemap_fname,
+                                MINIMUMSIZE = FALSE, RETURNIMAGE = TRUE,
+                                GRAYSCALE = FALSE)
+
+  # Redirect the graphical output to a PNG file
+
+  png(dest_png_fname, type = 'cairo-png')
+  # dev.cur()
+  plot.new()
+
+  # Try to map the NextBus vehicle locations on the background Google map
+  # giving colors according to the "dir_tag" of the vehicles servicing that
+  # route (if there are many directions inside the route, e.g., many more
+  # than the two -outgoing and returning- directions that the Generalized
+  # Transit Feed Specification recommends, then the colors will be re-used:
+  # the color palette only has five colors yet). For this reason, sort()
+  # is needed around the unique(), as to have the NA values in "dir_tag" as
+  # the last value analyzed (if NA does occur in "dir_tag"), if not NA will
+  # use up some of the most common colors in the palette.
+
+  possible_dir_tags <- sort(unique(nextbus_df$dir_tag), na.last = TRUE)
+  color_palette <- c("green", "red", "blue", "yellow", "orange")
+
+  for (i in 1:length(possible_dir_tags)){
+    a_dir_tag <- possible_dir_tags[i]
+    assoc_color <- color_palette[i %% length(color_palette)]
+    if ( debug_nextbus == TRUE ) {
+      cat("Plotting vehicles in direction '", a_dir_tag,
+          "' with color '", assoc_color, "'\n", sep = "")
+    }
+    to_add <- ifelse( i == 1, FALSE, TRUE )
+
+    # Sometimes NextBus (or the transit agency reporting to NextBus) doesn't
+    # give a "dir_tag" for the real-time location of a vehicle (is it turning
+    # direction at the end of the trip?), so our parser adds the dir_tag
+    # anyway but explicitly as an NA value for this vehicle. (This might
+    # happen also with other columns that NextBus provides.)
+
+    if(! is.na(a_dir_tag)) {
+      vehicles_in_this_direction <- nextbus_df[nextbus_df$dir_tag == a_dir_tag,]
+    } else {
+      vehicles_in_this_direction <- nextbus_df[is.na(nextbus_df$dir_tag),]
+    }
+
+    tmp <- PlotOnStaticMap(plot_gmap,
+                           lat = vehicles_in_this_direction$lat,
+                           lon = vehicles_in_this_direction$lon,
+                           zoom = gmap_zoom, NEWMAP = FALSE, add = to_add,
+                           FUN = points, cex = 1.5, pch = 20, col = assoc_color)
+  }
+
+  # Draw the vehicle IDs as labels on the map
+  ## (This below works but is not ready yet because of font sizes and
+  ## distance to points)
+  #
+  # TextOnStaticMap(plot_gmap,
+  #                 lat = nextbus_df$lat, lon = nextbus_df$lon,
+  #                 labels = nextbus_df$vehicle_id,
+  #                 add = TRUE)
+
+  # Stop redirecting this graphical output
+  dev.off()
 }
 
-# Draw the vehicle IDs as labels on the map
-## (This below works but is not ready yet because of font sizes and distance to points)
-#
-# TextOnStaticMap(background_map, lat = df$lat, lon = df$lon,
-#                 labels = df$vehicle_id, add = TRUE)
+# Request to plot the NextBus real-time vehicle locations data frame
+# on a Google Map, saving the result to a PNG image file
 
-dev.off()
+plot_nextbus_vehicle_df_gmaps(df, dest_png_fname = "nextbus_vehicles_on_gmap.png",
+                              gmap_type = "hybrid")
+
+cat("The image in 'nextbus_vehicles_on_gmap.png' can now be opened.")

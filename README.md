@@ -55,10 +55,19 @@ movement when its location was registered or updated in NextBus.)
 
 The program uses `RgoogleMaps` to plot the real-time location of the
 vehicles servicing a transit route, and saves this plot in a file
-name `nextbus_vehicles_on_gmap.png`.
+named `nextbus_vehicles_on_gmap.png`.
 
 An example of the RgoogleMaps plot with the NextBus real-time vehicle
-locations for route 38R of San Francisco Muni is below:
+locations for route `38R of San Francisco Muni` is below:
 
 ![A RgoogleMaps plot with the NextBus real-time vehicle locations for route 38R of San Francisco Muni](/nextbus_vehicles_on_gmap.png?raw=true "A RgoogleMaps plot with the NextBus real-time vehicle locations for route 38R of San Francisco Muni")
 
+Vehicles in the same direction of a route (having a same value in their
+attribute NextBus' `dirTag`), have the same color in the Google Map.
+Note that in this map it happens to appear a vehicle which is filled in
+`blue`: NextBus didn't provide a `dirTag` for it (a parked out-of-service
+vehicle?), so the parser in `R` inserted a `NA` value for the column
+`dir_tag` for it, and the plotter choose blue as an allowable color to
+distinguish this vehicle.
+
+this case it represents 
