@@ -55,7 +55,8 @@ movement when its location was registered or updated in NextBus.)
 
 The program uses `RgoogleMaps` to plot the real-time location of the
 vehicles servicing a transit route, and saves this plot in a file
-named `nextbus_vehicles_on_gmap.png`.
+named
+`nextbus_vehicles_on_gmap_agency_{agency}_route_{route}_time_{epoch_time}.png`.
 
 An example of the RgoogleMaps plot with the NextBus real-time vehicle
 locations for route `38R of San Francisco Muni` is below:
@@ -69,4 +70,16 @@ Note that in this map it happens to appear a vehicle which is filled in
 vehicle?), so the parser in `R` inserted a `NA` value for the column
 `dir_tag` for it, and the plotter choose blue as an allowable color to
 distinguish the case this vehicle represents.
+
+There can be an optional legend describing the mapping of the colors
+to the directions of the vehicles according to NextBus. Note that some
+agencies, for a same NextBus route, have subroutes with a `small
+variation` of the directions from the main route, folded inside the
+main route code: in this case multiple colors will be generated in
+the locations on the Google Map (and the legend will identify exactly
+which sub-route it is referring to). For example, for the `Toronto
+Transit Commission (TTC) 501 Queen St. streetcar` the real-time
+location plot on Google Maps (with a legend generated) can appear as:
+
+![A route with smaller subroutes: the Toronto TTC 501 Queen St. streetcar](/nextbus_vehicles_on_gmap_agency_ttc_route_501_toronto_transit_routes_with_small_variations_as_subroutes.png?raw=true "A route with smaller subroutes: the Toronto TTC 501 Queen St. streetcar")
 

@@ -1,4 +1,6 @@
 
+options(echo=FALSE)
+
 # documentation of the R package "sp" (geo-spatial):
 #     https://cran.r-project.org/web/packages/sp/sp.pdf
 #
@@ -10,6 +12,7 @@ required_packages <- c("XML", "sp", "RgoogleMaps", "gglot2")
 
 missing_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
 if( 0 < length(missing_packages) ) {
+  options(repos=c(CRAN="http://cran.cnr.Berkeley.edu/"))
   install.packages(missing_packages, dep=TRUE)
 }
 
@@ -33,17 +36,21 @@ debug_nextbus <- FALSE
 #
 # url_agencies <- "http://webservices.nextbus.com/service/publicXMLFeed?command=agencyList"
 #
-# NextBus "sf-muni" = San Francisco Municipal Transportation Agency
+# No validation of a valid transit route code in NextBus
+# (For testing purposes, agency "sf-muni" refers to the San Francisco Municipal Transportation Agency
 
-agency_code <- "sf-muni"
+cmdline_args <- commandArgs(TRUE)
+
+agency_code <- cmdline_args[1]
 
 # the bus route code. For a given transit agency, it can be taken from here:
 #
 #   http://webservices.nextbus.com/service/publicXMLFeed?command=routeList&a=<agency-code>
 #
-# In this case, the NextBus code is the same as the bus#, ie., San Francisco Muni 38R bus
+# No validation of a valid transit route code in NextBus
+# (For testing purposes, route "38R" is valid for transit agency "sf-muni")
 
-bus_route <- "38R"
+bus_route <- cmdline_args[2]
 
 # NextBus Vehicle locations NextBus API
 #
@@ -134,11 +141,57 @@ ggplot(df, aes(lat, lon, colour=secsSinceReport)) +
   theme_minimal() + geom_point() +
   labs(x = "Latitude", y = "Longitude", title=plot_title)
 
+# Function to return which percentile range of the data has the least samples
+
+least_populated_quantile <- function (v, quantile_probs) {
+
+  quantile_delims <- quantile(v, probs = quantile_probs, names = FALSE)
+  if ( debug_nextbus == TRUE ) {
+    cat("Least populated segment of", sort(v),
+        "in segments", quantile_delims, "\n")
+  }
+  # Initialization: the current segment in the quantiles which has the
+  # least number of elements in the very first (lowest) segment
+  curr_open_range <- quantile_delims[1]
+  curr_min <- sum(v <= curr_open_range)
+  curr_min_pos <- 1
+  curr_close_range <- curr_open_range
+
+  for (i in 2:(length(quantile_delims) - 1)){
+    curr_close_range <- quantile_delims[i]
+    if ( debug_nextbus == TRUE ) {
+      cat("Analyzing quantile range [", i,
+          "] of population from", curr_open_range,
+          "to", curr_close_range, "\n")
+    }
+
+    curr_count <- sum( v > curr_open_range & v <= curr_close_range )
+    if ( curr_count < curr_min ) {
+      curr_min <- curr_count
+      curr_min_pos <- i
+    }
+    curr_open_range <- curr_close_range
+  }
+
+  last_segm_count <- sum(v > curr_close_range)
+  if ( last_segm_count < curr_min ) {
+    curr_min_pos <- length(quantile_delims)
+  }
+
+  if ( debug_nextbus == TRUE ) {
+    cat("Least populated quantile range is", curr_min_pos, "\n")
+  }
+
+  return(curr_min_pos)
+}
+
 # Function to plot the NextBus real-time vehicle locations data frame
 # onto a Google Maps of the locality.
 
 plot_nextbus_vehicle_df_gmaps <- function(nextbus_df, dest_png_fname,
-                                          gmap_type = "roadmap") {
+                                          gmap_type = "roadmap",
+                                          show_legend = TRUE,
+                                          fixed_legend_pos = "bottomleft") {
 
   allowable_gmap_types <- c("roadmap", "mobile", "satellite", "terrain",
                             "hybrid", "mapmaker-roadmap", "mapmaker-hybrid")
@@ -172,11 +225,11 @@ plot_nextbus_vehicle_df_gmaps <- function(nextbus_df, dest_png_fname,
   # 'Error: all(size <= 640) is not TRUE'
 
   plot_gmap <- GetMap.bbox(bounding_box$lonR, bounding_box$latR,
-                                size = c(640, 640), zoom = gmap_zoom,
-                                format = "png32", maptype = gmap_type_to_req,
-                                SCALE=1, destfile = basemap_fname,
-                                MINIMUMSIZE = FALSE, RETURNIMAGE = TRUE,
-                                GRAYSCALE = FALSE)
+                           size = c(640, 640), zoom = gmap_zoom,
+                           format = "png32", maptype = gmap_type_to_req,
+                           SCALE=1, destfile = basemap_fname,
+                           MINIMUMSIZE = FALSE, RETURNIMAGE = TRUE,
+                           GRAYSCALE = FALSE)
 
   # Redirect the graphical output to a PNG file
 
@@ -234,6 +287,76 @@ plot_nextbus_vehicle_df_gmaps <- function(nextbus_df, dest_png_fname,
   #                 labels = nextbus_df$vehicle_id,
   #                 add = TRUE)
 
+  # Plot the legend of the colors of the route directions in Google Maps
+
+  if ( ! show_legend ) {
+    # we don't have to show the legend
+    # Stop redirecting this graphical output
+    dev.off()
+    return
+  }
+
+  legend_text <- possible_dir_tags
+  legend_text[is.na(legend_text)] <- "N.A."
+
+  if ( fixed_legend_pos == "" ) {
+    # The legend for the NextBus real-time vehicle locations on the Google Map
+    # was requested but its position wasn't given: we need to calculate were to
+    # better put it.
+    # The legend ought to be located in a position where there are no other
+    # coordinates from nextbus_df$lat and nextbus_df$lon, so that the legend
+    # does intersect data points
+    # Take the three quantiles of the NextBus vehicles' latitudes and
+    # longitudes (pbby a more precise segmentation in quantiles renders better
+    # graphics):
+    # You need to add latitudes/longitudes of bounding box 'bounding_box' too,
+    # because the Google Map is between them too
+
+    latitudes_v <- append(nextbus_df$lat, bounding_box$latR)
+    longitudes_v <- append(nextbus_df$lon, bounding_box$lonR)
+
+    if ( debug_nextbus == TRUE ) {
+      cat("Region expanded to analyze for legend: latitudes expanded from\n",
+          sort(nextbus_df$lat), "\nto include also\n", bounding_box$latR,
+          "\nresulting in\n", sort(latitudes_v),
+          "\nlongitudes expanded from\n",
+          sort(nextbus_df$lon), "\nto include also\n", bounding_box$lonR,
+          "\nresulting in\n", sort(longitudes_v), "\n")
+    }
+
+    l_popul_lat <- least_populated_quantile(latitudes_v, c(1.0/3, 2.0/3, 1))
+    l_popul_lon <- least_populated_quantile(longitudes_v, c(1.0/3, 2.0/3, 1))
+
+    legend_pos_vertl <- switch(l_popul_lat, "top", "", "bottom",
+                               stop("Unknown most populated quantile in latitude"))
+
+    legend_pos_horiz <- switch(l_popul_lon, "left", "", "right",
+                               stop("Unknown most populated quantile in longitude"))
+
+    legend_pos <- sprintf("%s%s", legend_pos_vertl, legend_pos_horiz)
+    if ( legend_pos == "") {
+      legend_pos <- "center"
+    }
+
+    if ( debug_nextbus == TRUE ) {
+      cat("Choosing to plot the legend at quadrant '", legend_pos,
+          "' because (lat: ", l_popul_lat, ", long: ", l_popul_lon,
+          " meaning '", legend_pos_vertl, "', ", legend_pos_horiz,
+          "')\n", sep = "")
+    }
+  } else {
+    legend_pos <- fixed_legend_pos
+  }
+
+  # Should the legend's background be transparent? If there is no background for
+  # the legend (argument bty="n") then it will paint no box around the legend,
+  # so the directions of the NextBus vehicles could confound with the Google Map,
+  # ie., their respective colors could become mixed and irrecognozible
+
+  legend(legend_pos, legend = legend_text, fill = color_palette,
+         title = "Directions", cex=0.6, pt.cex = 1, border = "white",
+         pch = '.', bty="o")
+
   # Stop redirecting this graphical output
   dev.off()
 }
@@ -241,7 +364,10 @@ plot_nextbus_vehicle_df_gmaps <- function(nextbus_df, dest_png_fname,
 # Request to plot the NextBus real-time vehicle locations data frame
 # on a Google Map, saving the result to a PNG image file
 
-plot_nextbus_vehicle_df_gmaps(df, dest_png_fname = "nextbus_vehicles_on_gmap.png",
-                              gmap_type = "hybrid")
+gmaps_png_fname <- sprintf("nextbus_vehicles_on_gmap_agency_%s_route_%s_time_%d.png",
+                            agency_code, bus_route, now_epoch)
 
-cat("The image in 'nextbus_vehicles_on_gmap.png' can now be opened.")
+plot_nextbus_vehicle_df_gmaps(df, dest_png_fname = gmaps_png_fname,
+                              gmap_type = "hybrid", fixed_legend_pos = "topleft")
+
+cat("The image in '", gmaps_png_fname, "' can now be opened.", sep = "")
