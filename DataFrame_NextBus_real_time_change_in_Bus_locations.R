@@ -1,6 +1,46 @@
 
 options(echo=FALSE)
 
+cmd_line_usage <- function() {
+  # Command-line usage
+  cat("Program to retrieve and plot the real-time location of NextBus transit vehicles.\n",
+      "Execute this program passing it two arguments in the command-line:\n\n",
+      "    First argument: the code of the NextBus transit agency\n",
+      "    Second argument: the code of the transit route in that agency\n\n",
+      "Example:\n\n",
+      "     R -f <this-script.R> --args  sf-muni  38\n\n",
+      "to download the data frame of the San Francisco Muni route 38 Geary Blvd route.\n",
+      sep = "")
+
+  quit( save = "no", status = 1 )
+}
+
+# the list of transit agencies for NextBus can be taken here:
+#
+#     http://webservices.nextbus.com/service/publicXMLFeed?command=agencyList
+#
+# url_agencies <- "http://webservices.nextbus.com/service/publicXMLFeed?command=agencyList"
+#
+# No validation of a valid transit route code in NextBus
+# (For testing purposes, agency "sf-muni" refers to the San Francisco Municipal Transportation Agency
+
+cmdline_args <- commandArgs(TRUE)
+
+if ( length(cmdline_args) != 2 || cmdline_args[1] == "" || cmdline_args[2] == "" ) {
+  cmd_line_usage()
+}
+
+agency_code <- cmdline_args[1]
+
+# the bus route code. For a given transit agency, it can be taken from here:
+#
+#   http://webservices.nextbus.com/service/publicXMLFeed?command=routeList&a=<agency-code>
+#
+# No validation of a valid transit route code in NextBus
+# (For testing purposes, route "38R" is valid for transit agency "sf-muni")
+
+bus_route <- cmdline_args[2]
+
 # documentation of the R package "sp" (geo-spatial):
 #     https://cran.r-project.org/web/packages/sp/sp.pdf
 #
@@ -21,36 +61,14 @@ require(sp)
 require(ggplot2)
 require(RgoogleMaps)
 
-# how long in time to analyze changes in the vehicle locations in NextBus:
-# in the most recent 15 minutes
-#
-time_window_bus_movement <- 15 * 60
-
 # whether to debug our use of the NextBus Feed webservices or not
 
 debug_nextbus <- FALSE
 
-# the list of transit agencies for NextBus can be taken here:
+# how long in time to analyze changes in the vehicle locations in NextBus:
+# in the most recent 15 minutes
 #
-#     http://webservices.nextbus.com/service/publicXMLFeed?command=agencyList
-#
-# url_agencies <- "http://webservices.nextbus.com/service/publicXMLFeed?command=agencyList"
-#
-# No validation of a valid transit route code in NextBus
-# (For testing purposes, agency "sf-muni" refers to the San Francisco Municipal Transportation Agency
-
-cmdline_args <- commandArgs(TRUE)
-
-agency_code <- cmdline_args[1]
-
-# the bus route code. For a given transit agency, it can be taken from here:
-#
-#   http://webservices.nextbus.com/service/publicXMLFeed?command=routeList&a=<agency-code>
-#
-# No validation of a valid transit route code in NextBus
-# (For testing purposes, route "38R" is valid for transit agency "sf-muni")
-
-bus_route <- cmdline_args[2]
+time_window_bus_movement <- 15 * 60
 
 # NextBus Vehicle locations NextBus API
 #
@@ -63,7 +81,9 @@ options(digits.secs=3)
 now_str <- Sys.time()
 now_epoch <- as.integer(unclass(now_str))
 
-# Get the changes in vehicle locations since the last 15 minutes
+# Get the changes in vehicle locations since the last 15 minutes (ie., in the
+# variable time_window_bus_movement)
+
 url_nextbus_feed <- sprintf(base_nextbus_vehicle_locations_fmt,
                             agency_code, bus_route,
                             now_epoch - time_window_bus_movement)
@@ -126,6 +146,8 @@ parse_nextbus_vehicle_to_df <- function(vehicle) {
   nextbus_veh_df
 }
 
+# Get the data frame with the location of all vehicles servicing this transit
+# route by parsing all the NextBus real-time XML answer.
 
 df <- do.call(rbind,
               xpathApply(xml_recs, "/body/vehicle",
@@ -151,7 +173,7 @@ least_populated_quantile <- function (v, quantile_probs) {
         "in segments", quantile_delims, "\n")
   }
   # Initialization: the current segment in the quantiles which has the
-  # least number of elements in the very first (lowest) segment
+  # least number of elements is the very first (lowest) segment
   curr_open_range <- quantile_delims[1]
   curr_min <- sum(v <= curr_open_range)
   curr_min_pos <- 1
@@ -238,17 +260,18 @@ plot_nextbus_vehicle_df_gmaps <- function(nextbus_df, dest_png_fname,
   plot.new()
 
   # Try to map the NextBus vehicle locations on the background Google map
-  # giving colors according to the "dir_tag" of the vehicles servicing that
+  # giving colors according to the "dir_tag" of the vehicles servicing this
   # route (if there are many directions inside the route, e.g., many more
   # than the two -outgoing and returning- directions that the Generalized
   # Transit Feed Specification recommends, then the colors will be re-used:
-  # the color palette only has five colors yet). For this reason, sort()
+  # the color palette only has nine colors yet). For this reason, sort()
   # is needed around the unique(), as to have the NA values in "dir_tag" as
   # the last value analyzed (if NA does occur in "dir_tag"), if not NA will
   # use up some of the most common colors in the palette.
 
   possible_dir_tags <- sort(unique(nextbus_df$dir_tag), na.last = TRUE)
-  color_palette <- c("green", "red", "blue", "yellow", "orange")
+  color_palette <- c("green", "red", "blue", "yellow", "orange",
+                     "brown", "purple", "gray", "white")
 
   for (i in 1:length(possible_dir_tags)){
     a_dir_tag <- possible_dir_tags[i]
@@ -259,11 +282,14 @@ plot_nextbus_vehicle_df_gmaps <- function(nextbus_df, dest_png_fname,
     }
     to_add <- ifelse( i == 1, FALSE, TRUE )
 
-    # Sometimes NextBus (or the transit agency reporting to NextBus) doesn't
-    # give a "dir_tag" for the real-time location of a vehicle (is it turning
-    # direction at the end of the trip?), so our parser adds the dir_tag
-    # anyway but explicitly as an NA value for this vehicle. (This might
-    # happen also with other columns that NextBus provides.)
+    # Get the vehicles which are now in this direction 'a_dir_tag' of the
+    # transit route.
+    # NA values: sometimes NextBus (or the transit agency reporting to
+    # NextBus) doesn't give a "dir_tag" for the real-time location of a
+    # vehicle (is it turning direction at the end of the trip?), so our
+    # parser adds the dir_tag anyway but explicitly as an NA value for this
+    # vehicle. (This might happen also with other columns that NextBus
+    # provides.)
 
     if(! is.na(a_dir_tag)) {
       vehicles_in_this_direction <- nextbus_df[nextbus_df$dir_tag == a_dir_tag,]
@@ -303,12 +329,13 @@ plot_nextbus_vehicle_df_gmaps <- function(nextbus_df, dest_png_fname,
     # The legend for the NextBus real-time vehicle locations on the Google Map
     # was requested but its position wasn't given: we need to calculate were to
     # better put it.
-    # The legend ought to be located in a position where there are no other
-    # coordinates from nextbus_df$lat and nextbus_df$lon, so that the legend
-    # does intersect data points
-    # Take the three quantiles of the NextBus vehicles' latitudes and
-    # longitudes (pbby a more precise segmentation in quantiles renders better
-    # graphics):
+    # The legend ought to be dynamically located on the map in a position
+    # where there are no other coordinates from nextbus_df$lat and
+    # nextbus_df$lon, so that the legend does not intersect data points. For
+    # this, take the three quantiles of the NextBus vehicles' latitudes and
+    # longitudes (pbby a smaller segmentation in more quantiles, not in three
+    # quantiles only, renders better graphics)
+
     # You need to add latitudes/longitudes of bounding box 'bounding_box' too,
     # because the Google Map is between them too
 
@@ -323,6 +350,11 @@ plot_nextbus_vehicle_df_gmaps <- function(nextbus_df, dest_png_fname,
           sort(nextbus_df$lon), "\nto include also\n", bounding_box$lonR,
           "\nresulting in\n", sort(longitudes_v), "\n")
     }
+
+    # Find the geometrical segment (of latitude/longitudes) with NextBus
+    # transit vehicles that is the least populated according to each
+    # quantiles of latitudes/longitudes: in this least populated segment is
+    # where it is best to locate the dinamycally placed legend
 
     l_popul_lat <- least_populated_quantile(latitudes_v, c(1.0/3, 2.0/3, 1))
     l_popul_lon <- least_populated_quantile(longitudes_v, c(1.0/3, 2.0/3, 1))
@@ -370,4 +402,4 @@ gmaps_png_fname <- sprintf("nextbus_vehicles_on_gmap_agency_%s_route_%s_time_%d.
 plot_nextbus_vehicle_df_gmaps(df, dest_png_fname = gmaps_png_fname,
                               gmap_type = "hybrid", fixed_legend_pos = "topleft")
 
-cat("The image in '", gmaps_png_fname, "' can now be opened.", sep = "")
+cat("The image in '", gmaps_png_fname, "' can now be opened.\n", sep = "")
